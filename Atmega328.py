@@ -24,6 +24,7 @@
 
 import re
 from sim_mem import Memory
+from pyparsing import Word, alphas, nums, alphanums, Literal, Suppress, ZeroOrMore, Optional, hexnums
 
 class OPC():
     mask      = 0
@@ -33,13 +34,15 @@ class OPC():
     fmt       = None
     sim_instr = None
 
-    def __init__(self, mask, remainder, opcstr, opdcmd, fmt, sim_instr):
+    def __init__(self, mask, remainder, opcstr, opdcmd, fmt, sim_instr, code_opd, token):
         self.mask = mask
         self.remainder = remainder
         self.opcstr = opcstr
         self.opdcmd = opdcmd
         self.fmt = fmt
         self.sim_instr = sim_instr
+        self.code_opd = code_opd
+        self.token = token
 
 
 class Atmega328():
@@ -61,6 +64,7 @@ class Atmega328():
     reg3_reg3  = lambda d, s: "r{:d}, r{:d}".format(d["d"][0] + 16, d["r"][0] + 16)
     reg4_reg4  = lambda d, s: "r{:d}, r{:d}".format(d["d"][0] + 16, d["r"][0] + 16)
     reg4       = lambda d, s: "r{:d}".format(d["d"][0] + 16)
+    reg_x      = lambda d, s: "r{d[0]:d}, X".format(**d)
     reg_x      = lambda d, s: "r{d[0]:d}, X".format(**d)
     reg_mx     = lambda d, s: "r{d[0]:d}, -X".format(**d)
     reg_xp     = lambda d, s: "r{d[0]:d}, X+".format(**d)
@@ -105,6 +109,19 @@ class Atmega328():
     N = 2
     Z = 1
     C = 0
+    
+    #Tokens
+    etiqueta = Word(alphas, alphas + nums) + ":"
+    comentario = Optional(Suppress(";" + Word(alphanums)))
+    
+    d0_31 = Suppress(Word(alphas) + "r") + Word(nums)
+    d0_31.addCondition(lambda t: int(t[0]) <= 31)
+    
+    d0_31_r0_31 = Suppress(Word(alphas) + "r") + Word(nums) + Suppress(","+ZeroOrMore(" ")+"r") + Word(nums)
+    d0_31_r0_31.addCondition(lambda t: int(t[0]) <= 31 and int(t[1]) <= 31)
+    
+    d0_31_k24_30 = Suppress(Word(alphas) + "r") + Word(nums) + Suppress(","+ZeroOrMore(" ")) + Word(hexnums)
+    d0_31_k24_30.addCondition(lambda t: int(t[0]) <= 31 and int(t[1]) <= 31)
 
     #GRUPO N
     def f_imm_4(self, opcstr, opd_dict):
@@ -792,194 +809,194 @@ class Atmega328():
     #   4:
     opcodes = (
         #A
-        OPC(0xfc00, 0x1c00, "adc",    "r4d5r1",     reg_reg,    f_reg_reg),     # 1
-        OPC(0xfc00, 0x0c00, "add",    "r4d5r1",     reg_reg,    f_reg_reg),     # 1
-        OPC(0xff00, 0x9600, "adiw",   "K4d2K2",     dreg_imm,   f_dreg_imm),    # 1
-        OPC(0xfc00, 0x2000, "and",    "r4d5r1",     reg_reg,    f_reg_reg),     # 1
-        OPC(0xf000, 0x7000, "andi",   "K4d4K4",     reg8_imm,   f_reg8_imm),    # 1
-        OPC(0xfe0f, 0x9405, "asr",    "-4d5",       reg,        f_reg),         # 3
+        OPC(0xfc00, 0x1c00, "adc",    "r4d5r1",     reg_reg,    f_reg_reg, "b4a5b1", d0_31_r0_31),     # 1
+        OPC(0xfc00, 0x0c00, "add",    "r4d5r1",     reg_reg,    f_reg_reg, "b4a5b1", d0_31_r0_31),     # 1
+        OPC(0xff00, 0x9600, "adiw",   "K4d2K2",     dreg_imm,   f_dreg_imm,"b4a1b2", d0_31_k24_30),    # 1
+        OPC(0xfc00, 0x2000, "and",    "r4d5r1",     reg_reg,    f_reg_reg, ""      , None),     # 1
+        OPC(0xf000, 0x7000, "andi",   "K4d4K4",     reg8_imm,   f_reg8_imm, ""      , None),    # 1
+        OPC(0xfe0f, 0x9405, "asr",    "-4d5",       reg,        f_reg, "", None),         # 3
 
         #B @12
         #OPC(0xff8f, 0x9488, "bclr",   "-4s3",      bit,        f_bit),
-        OPC(0xfe08, 0xf800, "bld",    "b3-1d5",     reg_bit,    f_reg_bit),     # 4
+        OPC(0xfe08, 0xf800, "bld",    "b3-1d5",     reg_bit,    f_reg_bit, ""      , None),     # 4
         #OPC(0xfc00, 0xf400, "brbc",   "s3k7",      bit_rel,    f_bit_rel),
         #OPC(0xfc00, 0xf000, "brbs",   "s3k7",      bit_rel,    f_bit_rel),
-        OPC(0xfc07, 0xf400, "brcc",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xfc07, 0xf000, "brcs",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xffff, 0x9598, "break",  "",           no_opd,     f_no_opd),      # 2
-        OPC(0xfc07, 0xf001, "breq",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xfc07, 0xf404, "brge",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xfc07, 0xf405, "brhc",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xfc07, 0xf005, "brhs",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xfc07, 0xf407, "brid",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xfc07, 0xf007, "brie",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xfc07, 0xf000, "brlo",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xfc07, 0xf004, "brlt",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xfc07, 0xf002, "brmi",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xfc07, 0xf401, "brne",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xfc07, 0xf402, "brpl",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xfc07, 0xf400, "brsh",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xfc07, 0xf406, "brtc",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xfc07, 0xf006, "brts",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xfc07, 0xf403, "brvc",   "-3k7",       rel_add,    f_rel_add),     # 4
-        OPC(0xfc07, 0xf003, "brvs",   "-3k7",       rel_add,    f_rel_add),     # 4
+        OPC(0xfc07, 0xf400, "brcc",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf000, "brcs",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xffff, 0x9598, "break",  "",           no_opd,     f_no_opd, ""      , None),      # 2
+        OPC(0xfc07, 0xf001, "breq",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf404, "brge",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf405, "brhc",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf005, "brhs",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf407, "brid",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf007, "brie",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf000, "brlo",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf004, "brlt",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf002, "brmi",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf401, "brne",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf402, "brpl",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf400, "brsh",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf406, "brtc",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf006, "brts",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf403, "brvc",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf003, "brvs",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
         #OPC(0xff8f, 0x9408, "bset",   "-4s3",      bit,        f_bit),
-        OPC(0xfe08, 0xfa00, "bst",    "b3-1d5",     reg_bit,    f_reg_bit),     # 4
+        OPC(0xfe08, 0xfa00, "bst",    "b3-1d5",     reg_bit,    f_reg_bit, "", None),     # 4
 
         #C
-        OPC(0xfe0e, 0x940e, "call",   "!k17-3k5",   add17,      f_add17),       # 2
-        OPC(0xff00, 0x9800, "cbi",    "b3A5",       io_bit,     f_io_bit),      # 4
-        OPC(0xffff, 0x9488, "clc",    "",           no_opd,     f_no_opd),      # 4
-        OPC(0xffff, 0x94d8, "clh",    "",           no_opd,     f_no_opd),      # 4
-        OPC(0xffff, 0x94f8, "cli",    "",           no_opd,     f_no_opd),      # 4
-        OPC(0xffff, 0x94a8, "cln",    "",           no_opd,     f_no_opd),      # 4
-        OPC(0xfc00, 0x2400, "clr",    "r4d5r1",     reg,        f_reg),         # 2
-        OPC(0xffff, 0x94c8, "cls",    "",           no_opd,     f_no_opd),      # 4
-        OPC(0xffff, 0x94e8, "clt",    "",           no_opd,     f_no_opd),      # 4
-        OPC(0xffff, 0x94b8, "clv",    "",           no_opd,     f_no_opd),      # 4
-        OPC(0xffff, 0x9498, "clz",    "",           no_opd,     f_no_opd),      # 4
-        OPC(0xfe0f, 0x9400, "com",    "-4d5",       reg,        f_reg),
-        OPC(0xfe00, 0x1400, "cp",     "r4d5r1",     reg_reg,    f_reg_reg),     # 1
-        OPC(0xfc00, 0x0400, "cpc",    "r4d5r1",     reg_reg,    f_reg_reg),     # 1
-        OPC(0xf000, 0x3000, "cpi",    "K4d4K4",     reg8_imm,   f_reg8_imm),    # 1
-        OPC(0xfc00, 0x1000, "cpse",   "r4d5r1",     reg_reg,    f_reg_reg),     # 1
+        OPC(0xfe0e, 0x940e, "call",   "!k17-3k5",   add17,      f_add17, ""      , None),       # 2
+        OPC(0xff00, 0x9800, "cbi",    "b3A5",       io_bit,     f_io_bit, ""      , None),      # 4
+        OPC(0xffff, 0x9488, "clc",    "",           no_opd,     f_no_opd, ""      , None),      # 4
+        OPC(0xffff, 0x94d8, "clh",    "",           no_opd,     f_no_opd, ""      , None),      # 4
+        OPC(0xffff, 0x94f8, "cli",    "",           no_opd,     f_no_opd, ""      , None),      # 4
+        OPC(0xffff, 0x94a8, "cln",    "",           no_opd,     f_no_opd, ""      , None),      # 4
+        OPC(0xfc00, 0x2400, "clr",    "r4d5r1",     reg,        f_reg, ""      , None),         # 2
+        OPC(0xffff, 0x94c8, "cls",    "",           no_opd,     f_no_opd, ""      , None),      # 4
+        OPC(0xffff, 0x94e8, "clt",    "",           no_opd,     f_no_opd, ""      , None),      # 4
+        OPC(0xffff, 0x94b8, "clv",    "",           no_opd,     f_no_opd, ""      , None),      # 4
+        OPC(0xffff, 0x9498, "clz",    "",           no_opd,     f_no_opd, ""      , None),      # 4
+        OPC(0xfe0f, 0x9400, "com",    "-4d5",       reg,        f_reg, ""      , None),
+        OPC(0xfe00, 0x1400, "cp",     "r4d5r1",     reg_reg,    f_reg_reg, ""      , None),     # 1
+        OPC(0xfc00, 0x0400, "cpc",    "r4d5r1",     reg_reg,    f_reg_reg, ""      , None),     # 1
+        OPC(0xf000, 0x3000, "cpi",    "K4d4K4",     reg8_imm,   f_reg8_imm, ""      , None),    # 1
+        OPC(0xfc00, 0x1000, "cpse",   "r4d5r1",     reg_reg,    f_reg_reg, ""      , None),     # 1
 
         #D
-        OPC(0xfe0f, 0x940a, "dec",    "-4d5",       reg,        f_reg),         # 3
-        OPC(0xff0f, 0x940b, "des",    "-4K4",       imm_4,      f_imm_4),       # 3
+        OPC(0xfe0f, 0x940a, "dec",    "-4d5",       reg,        f_reg, ""      , None),         # 3
+        OPC(0xff0f, 0x940b, "des",    "-4K4",       imm_4,      f_imm_4, ""      , None),       # 3
 
         #E
-        OPC(0xffff, 0x9519, "eicall", "",           no_opd,     f_no_opd),      # 2
-        OPC(0xffff, 0x9419, "eijmp",  "",           no_opd,     f_no_opd),      # 2
-        OPC(0xffff, 0x95d8, "elpm",   "",           no_opd,     f_no_opd),      # 2
-        OPC(0xfe0f, 0x9006, "elpm",   "-4d5",       reg_z,      f_reg_z),       # 2
-        OPC(0xfe0f, 0x9007, "elpm",   "-4d5",       reg_zp,     f_reg_zp),      # 2
-        OPC(0xfc00, 0x2400, "eor",    "r4d5r1",     reg_reg,    f_reg_reg),     # 1
+        OPC(0xffff, 0x9519, "eicall", "",           no_opd,     f_no_opd, ""      , None),      # 2
+        OPC(0xffff, 0x9419, "eijmp",  "",           no_opd,     f_no_opd, ""      , None),      # 2
+        OPC(0xffff, 0x95d8, "elpm",   "",           no_opd,     f_no_opd, ""      , None),      # 2
+        OPC(0xfe0f, 0x9006, "elpm",   "-4d5",       reg_z,      f_reg_z, ""      , None),       # 2
+        OPC(0xfe0f, 0x9007, "elpm",   "-4d5",       reg_zp,     f_reg_zp, ""      , None),      # 2
+        OPC(0xfc00, 0x2400, "eor",    "r4d5r1",     reg_reg,    f_reg_reg, ""      , None),     # 1
 
         #F
-        OPC(0xff88, 0x0308, "fmul",   "r3-1d3",     reg8_reg8,  f_reg8_reg8),   # 3
-        OPC(0xff88, 0x0380, "fmuls",  "r3-1d3",     reg8_reg8,  f_reg8_reg8),   # 3
-        OPC(0xff88, 0x0388, "fmulsu", "r3-1d3",     reg8_reg8,  f_reg8_reg8),   # 3
+        OPC(0xff88, 0x0308, "fmul",   "r3-1d3",     reg8_reg8,  f_reg8_reg8, ""      , None),   # 3
+        OPC(0xff88, 0x0380, "fmuls",  "r3-1d3",     reg8_reg8,  f_reg8_reg8, ""      , None),   # 3
+        OPC(0xff88, 0x0388, "fmulsu", "r3-1d3",     reg8_reg8,  f_reg8_reg8, ""      , None),   # 3
 
         #G - No hay
 
         #H - No hay
 
         #I
-        OPC(0xffff, 0x9509, "icall",  "",           no_opd,     f_no_opd),      # 2
-        OPC(0xffff, 0x9409, "ijmp",   "",           no_opd,     f_no_opd),      # 2
-        OPC(0xf800, 0xb000, "in",     "A4d5A2",     reg_io,     f_reg_io),      # 3
-        OPC(0xfe0f, 0x9403, "inc",    "-4d5",       reg,        f_reg),         # 3
+        OPC(0xffff, 0x9509, "icall",  "",           no_opd,     f_no_opd, ""      , None),      # 2
+        OPC(0xffff, 0x9409, "ijmp",   "",           no_opd,     f_no_opd, ""      , None),      # 2
+        OPC(0xf800, 0xb000, "in",     "A4d5A2",     reg_io,     f_reg_io, ""      , None),      # 3
+        OPC(0xfe0f, 0x9403, "inc",    "-4d5",       reg,        f_reg, ""      , None),         # 3
 
         #J
-        OPC(0xfe0e, 0x940c, "jmp",    "!k17-3k5",   add17,      f_add17),       # 2
+        OPC(0xfe0e, 0x940c, "jmp",    "!k17-3k5",   add17,      f_add17, ""      , None),       # 2
 
         #K - No hay
 
         #L
-        OPC(0xfe0f, 0x9206, "lac",    "-4r5",       z_reg,      f_z_reg),
-        OPC(0xfe0f, 0x9205, "las",    "-4r5",       z_reg,      f_z_reg),
-        OPC(0xfe0f, 0x9207, "lat",    "-4r5",       z_reg,      f_z_reg),
-        OPC(0xfe0f, 0x900c, "ld",     "-4d5",       reg_x,      f_reg_x),
-        OPC(0xfe0f, 0x900d, "ld",     "-4d5",       reg_xp,     f_reg_xp),
-        OPC(0xfe0f, 0x900e, "ld",     "-4d5",       reg_mx,     f_reg_mx),
-        OPC(0xfe0f, 0x900c, "ld",     "-4d5",       reg_x,      f_reg_x),
-        OPC(0xfe0f, 0x900d, "ld",     "-4d5",       reg_xp,     f_reg_xp),
-        OPC(0xfe0f, 0x900e, "ld",     "-4d5",       reg_mx,     f_reg_mx),
-        OPC(0xfe0f, 0x8008, "ld",     "-4d5",       reg_y,      f_reg_y),
-        OPC(0xfe0f, 0x9009, "ld",     "-4d5",       reg_yp,     f_reg_yp),
-        OPC(0xfe0f, 0x900a, "ld",     "-4d5",       reg_my,     f_reg_my),
-        OPC(0xd208, 0x8008, "ldd",    "q3-1d5-1q2-1q1", reg_yo, f_reg_yo),
-        OPC(0xfe0f, 0x8000, "ld",     "-4d5",       reg_z,      f_reg_z),
-        OPC(0xfe0f, 0x9001, "ld",     "-4d5",       reg_zp,     f_reg_zp),
-        OPC(0xfe0f, 0x9002, "ld",     "-4d5",       reg_mz,     f_reg_mz),
-        OPC(0xd208, 0x8000, "ldd",    "q3-1d5-1q2-1q1", reg_zo, f_reg_zo),
-        OPC(0xf000, 0xe000, "ldi",    "K4d4K4",     reg8_imm,   f_reg8_imm),
-        OPC(0xfe0f, 0x9000, "lds",    "!k16-4d5",   reg_imm16,  f_reg_imm16),
-        OPC(0xffff, 0x95c8, "lpm",    "",           no_opd,     f_no_opd),
-        OPC(0xfe0f, 0x9004, "lpm",    "-4d5",       reg_z,      f_reg_z),
-        OPC(0xfe0f, 0x9005, "lpm",    "-4d5",       reg_zp,     f_reg_zp),
-        OPC(0xfc00, 0x0c00, "lsl",    "r4d5r1",     reg,        f_reg),         # 3
-        OPC(0xfe0f, 0x9406, "lsr",    "-4d5",       reg,        f_reg),         # 3
+        OPC(0xfe0f, 0x9206, "lac",    "-4r5",       z_reg,      f_z_reg, ""      , None),
+        OPC(0xfe0f, 0x9205, "las",    "-4r5",       z_reg,      f_z_reg, ""      , None),
+        OPC(0xfe0f, 0x9207, "lat",    "-4r5",       z_reg,      f_z_reg, ""      , None),
+        OPC(0xfe0f, 0x900c, "ld",     "-4d5",       reg_x,      f_reg_x, ""      , None),
+        OPC(0xfe0f, 0x900d, "ld",     "-4d5",       reg_xp,     f_reg_xp, ""      , None),
+        OPC(0xfe0f, 0x900e, "ld",     "-4d5",       reg_mx,     f_reg_mx, ""      , None),
+        OPC(0xfe0f, 0x900c, "ld",     "-4d5",       reg_x,      f_reg_x, ""      , None),
+        OPC(0xfe0f, 0x900d, "ld",     "-4d5",       reg_xp,     f_reg_xp, ""      , None),
+        OPC(0xfe0f, 0x900e, "ld",     "-4d5",       reg_mx,     f_reg_mx, ""      , None),
+        OPC(0xfe0f, 0x8008, "ld",     "-4d5",       reg_y,      f_reg_y, ""      , None),
+        OPC(0xfe0f, 0x9009, "ld",     "-4d5",       reg_yp,     f_reg_yp, ""      , None),
+        OPC(0xfe0f, 0x900a, "ld",     "-4d5",       reg_my,     f_reg_my, ""      , None),
+        OPC(0xd208, 0x8008, "ldd",    "q3-1d5-1q2-1q1", reg_yo, f_reg_yo, ""      , None),
+        OPC(0xfe0f, 0x8000, "ld",     "-4d5",       reg_z,      f_reg_z, ""      , None),
+        OPC(0xfe0f, 0x9001, "ld",     "-4d5",       reg_zp,     f_reg_zp, ""      , None),
+        OPC(0xfe0f, 0x9002, "ld",     "-4d5",       reg_mz,     f_reg_mz, ""      , None),
+        OPC(0xd208, 0x8000, "ldd",    "q3-1d5-1q2-1q1", reg_zo, f_reg_zo, ""      , None),
+        OPC(0xf000, 0xe000, "ldi",    "K4d4K4",     reg8_imm,   f_reg8_imm, ""      , None),
+        OPC(0xfe0f, 0x9000, "lds",    "!k16-4d5",   reg_imm16,  f_reg_imm16, ""      , None),
+        OPC(0xffff, 0x95c8, "lpm",    "",           no_opd,     f_no_opd, ""      , None),
+        OPC(0xfe0f, 0x9004, "lpm",    "-4d5",       reg_z,      f_reg_z, ""      , None),
+        OPC(0xfe0f, 0x9005, "lpm",    "-4d5",       reg_zp,     f_reg_zp, ""      , None),
+        OPC(0xfc00, 0x0c00, "lsl",    "r4d5r1",     reg,        f_reg, ""      , None),         # 3
+        OPC(0xfe0f, 0x9406, "lsr",    "-4d5",       reg,        f_reg, ""      , None),         # 3
 
         #M
-        OPC(0xfc00, 0x2c00, "mov",    "r4d5r1",     reg_reg,    f_reg_reg),     # 1
-        OPC(0xff00, 0x0100, "movw",   "r4d4",       dreg_dreg,  f_dreg_dreg),   # 1
-        OPC(0xfc00, 0x9c00, "mul",    "r4d5r1",     reg_reg,    f_reg_reg),     # 3
-        OPC(0xff00, 0x0200, "muls",   "r4d4",       reg4_reg4,  f_reg4_reg4),   # 3
-        OPC(0xff88, 0x0300, "mulsu",  "r3-1d3",     reg3_reg3,  f_reg3_reg3),   # 3
+        OPC(0xfc00, 0x2c00, "mov",    "r4d5r1",     reg_reg,    f_reg_reg, ""      , None),     # 1
+        OPC(0xff00, 0x0100, "movw",   "r4d4",       dreg_dreg,  f_dreg_dreg, ""      , None),   # 1
+        OPC(0xfc00, 0x9c00, "mul",    "r4d5r1",     reg_reg,    f_reg_reg, ""      , None),     # 3
+        OPC(0xff00, 0x0200, "muls",   "r4d4",       reg4_reg4,  f_reg4_reg4, ""      , None),   # 3
+        OPC(0xff88, 0x0300, "mulsu",  "r3-1d3",     reg3_reg3,  f_reg3_reg3, ""      , None),   # 3
 
         #N
-        OPC(0xfe0f, 0x9401, "neg",    "-4d5",       reg,        f_reg),         # 3
-        OPC(0xffff, 0x0000, "nop",    "",           no_opd,     f_no_opd),      # 2
+        OPC(0xfe0f, 0x9401, "neg",    "-4d5",       reg,        f_reg, ""      , None),         # 3
+        OPC(0xffff, 0x0000, "nop",    "",           no_opd,     f_no_opd, ""      , None),      # 2
 
         #O
-        OPC(0xfc00, 0x2800, "or",     "r4d5r1",     reg_reg,    f_reg_reg),     # 1
-        OPC(0xf000, 0x6000, "ori",    "K4d4K4",     reg8_imm,   f_reg8_imm),    # 1
-        OPC(0xf800, 0xb800, "out",    "A4r5A2",     io_reg,     f_io_reg),      # 3
+        OPC(0xfc00, 0x2800, "or",     "r4d5r1",     reg_reg,    f_reg_reg, ""      , None),     # 1
+        OPC(0xf000, 0x6000, "ori",    "K4d4K4",     reg8_imm,   f_reg8_imm, ""      , None),    # 1
+        OPC(0xf800, 0xb800, "out",    "A4r5A2",     io_reg,     f_io_reg, ""      , None),      # 3
 
         #P
-        OPC(0xfe0f, 0x900f, "pop",    "-4d5",       reg,        f_reg),         # 2
-        OPC(0xfe0f, 0x920f, "push",   "-4d5",       reg,        f_reg),         # 2
+        OPC(0xfe0f, 0x900f, "pop",    "-4d5",       reg,        f_reg, ""      , None),         # 2
+        OPC(0xfe0f, 0x920f, "push",   "-4d5",       reg,        f_reg, "", None),         # 2
 
         #Q - No hay
 
         #R
-        OPC(0xf000, 0xd000, "rcall",  "k12",        rel_add12,  f_rel_add12),   # 2
-        OPC(0xffff, 0x9508, "ret",    "",           no_opd,     f_no_opd),      # 2
-        OPC(0xffff, 0x9518, "reti",   "",           no_opd,     f_no_opd),      # 2
-        OPC(0xf000, 0xc000, "rjmp",   "k12",        rel_add12,  f_rel_add12),   # 2
-        OPC(0xfc00, 0x1c00, "rol",    "r4d5r1",     reg,        f_reg),         # 3
-        OPC(0xfe0f, 0x9407, "ror",    "-4d5",       reg,        f_reg),         # 3
+        OPC(0xf000, 0xd000, "rcall",  "k12",        rel_add12,  f_rel_add12, "", None),   # 2
+        OPC(0xffff, 0x9508, "ret",    "",           no_opd,     f_no_opd, "", None),      # 2
+        OPC(0xffff, 0x9518, "reti",   "",           no_opd,     f_no_opd, "", None),      # 2
+        OPC(0xf000, 0xc000, "rjmp",   "k12",        rel_add12,  f_rel_add12, "", None),   # 2
+        OPC(0xfc00, 0x1c00, "rol",    "r4d5r1",     reg,        f_reg, "", None),         # 3
+        OPC(0xfe0f, 0x9407, "ror",    "-4d5",       reg,        f_reg, "", None),         # 3
 
         #S - en proceso
-        OPC(0xfc00, 0x0800, "sbc",    "r4d5r1",     reg_reg,    f_reg_reg),     # 1
-        OPC(0xf000, 0x4000, "sbci",   "K4d4K4",     reg8_imm,   f_reg8_imm),    # 1
-        OPC(0xff00, 0x9a00, "sbi",    "b3A5",       io_bit,     f_io_bit),      # 4
-        OPC(0xff00, 0x9900, "sbic",   "b3A5",       io_bit,     f_io_bit),      # 4
-        OPC(0xff00, 0x9b00, "sbis",   "b3A5",       io_bit,     f_io_bit),      # 4
-        OPC(0xff00, 0x9700, "sbiw",   "K4d2K2",     dreg_imm,   f_dreg_imm),    # 4
-        OPC(0xf000, 0x6000, "sbr",    "K4d4K4",     reg_imm,    f_reg_imm),     # 4
-        OPC(0xfe00, 0xfc00, "sbrc",   "b3-1d5",     reg_bit,    f_reg_bit),     # 4
-        OPC(0xfe08, 0xfe00, "sbrs",   "b3-1d5",     reg_bit,    f_reg_bit),     # 4
-        OPC(0xffff, 0x9408, "sec",    "",           no_opd,     f_no_opd),      # 4
-        OPC(0xffff, 0x9458, "seh",    "",           no_opd,     f_no_opd),      # 4
-        OPC(0xffff, 0x9478, "sei",    "",           no_opd,     f_no_opd),      # 4
-        OPC(0xffff, 0x9428, "sen",    "",           no_opd,     f_no_opd),      # 4
-        OPC(0xff0f, 0xef0f, "ser",    "-4d4",       reg4,       f_reg4),
-        OPC(0xffff, 0x9448, "ses",    "",           no_opd,     f_no_opd),      # 4
-        OPC(0xffff, 0x9468, "set",    "",           no_opd,     f_no_opd),      # 4
-        OPC(0xffff, 0x9438, "sev",    "",           no_opd,     f_no_opd),      # 4
-        OPC(0xffff, 0x9418, "sez",    "",           no_opd,     f_no_opd),      # 4
-        OPC(0xffff, 0x9588, "sleep",  "",           no_opd,     f_no_opd),      # 2
-        OPC(0xffff, 0x95e8, "spm",    "",           no_opd,     f_no_opd),
-        OPC(0xffff, 0x95f8, "spm",    "",           just_zp,    f_just_zp),
-        OPC(0xfe0f, 0x920c, "st",     "-4r5",       x_reg,      f_x_reg),
-        OPC(0xfe0f, 0x920d, "st",     "-4r5",       xp_reg,     f_xp_reg),
-        OPC(0xfe0f, 0x920e, "st",     "-4r5",       mx_reg,     f_mx_reg),
-        OPC(0xfe0f, 0x8208, "st",     "-4r5",       y_reg,      f_y_reg),
-        OPC(0xfe0f, 0x9209, "st",     "-4r5",       yp_reg,     f_yp_reg),
-        OPC(0xfe0f, 0x920a, "st",     "-4r5",       my_reg,     f_my_reg),
-        OPC(0xd208, 0x8208, "std",    "q3-1r5-1q2-1q1", yo_reg, f_yo_reg),
-        OPC(0xfe0f, 0x8200, "st",     "-4d5",       z_reg,      f_z_reg),
-        OPC(0xfe0f, 0x9201, "st",     "-4d5",       zp_reg,     f_zp_reg),
-        OPC(0xfe0f, 0x9202, "st",     "-4d5",       mz_reg,     f_mz_reg),
-        OPC(0xd208, 0x8200, "std",    "q3-1d5-1q2-1q1", zo_reg, f_zo_reg),
-        OPC(0xfe0f, 0x9200, "sts",    "!k16-4d5",   imm16_reg,  f_imm16_reg),
-        OPC(0xf800, 0xa800, "sts",    "k4d4k3",     imm7_reg,   f_imm7_reg),
-        OPC(0xfc00, 0x1800, "sub",    "r4d5r1",     reg_reg,    f_reg_reg),     # 1
-        OPC(0xf000, 0x5000, "subi",   "K4d4K4",     reg8_imm,   f_reg8_imm),    # 3
-        OPC(0xfe0f, 0x9402, "swap",   "-4d5",       reg,        f_reg),         # 2
+        OPC(0xfc00, 0x0800, "sbc",    "r4d5r1",     reg_reg,    f_reg_reg, "", None),     # 1
+        OPC(0xf000, 0x4000, "sbci",   "K4d4K4",     reg8_imm,   f_reg8_imm, "", None),    # 1
+        OPC(0xff00, 0x9a00, "sbi",    "b3A5",       io_bit,     f_io_bit, "", None),      # 4
+        OPC(0xff00, 0x9900, "sbic",   "b3A5",       io_bit,     f_io_bit, "", None),      # 4
+        OPC(0xff00, 0x9b00, "sbis",   "b3A5",       io_bit,     f_io_bit, "", None),      # 4
+        OPC(0xff00, 0x9700, "sbiw",   "K4d2K2",     dreg_imm,   f_dreg_imm, "", None),    # 4
+        OPC(0xf000, 0x6000, "sbr",    "K4d4K4",     reg_imm,    f_reg_imm, "", None),     # 4
+        OPC(0xfe00, 0xfc00, "sbrc",   "b3-1d5",     reg_bit,    f_reg_bit, "", None),     # 4
+        OPC(0xfe08, 0xfe00, "sbrs",   "b3-1d5",     reg_bit,    f_reg_bit, "", None),     # 4
+        OPC(0xffff, 0x9408, "sec",    "",           no_opd,     f_no_opd, "", None),      # 4
+        OPC(0xffff, 0x9458, "seh",    "",           no_opd,     f_no_opd, "", None),      # 4
+        OPC(0xffff, 0x9478, "sei",    "",           no_opd,     f_no_opd, "", None),      # 4
+        OPC(0xffff, 0x9428, "sen",    "",           no_opd,     f_no_opd, "", None),      # 4
+        OPC(0xff0f, 0xef0f, "ser",    "-4d4",       reg4,       f_reg4, "", None),
+        OPC(0xffff, 0x9448, "ses",    "",           no_opd,     f_no_opd, "", None),      # 4
+        OPC(0xffff, 0x9468, "set",    "",           no_opd,     f_no_opd, "", None),      # 4
+        OPC(0xffff, 0x9438, "sev",    "",           no_opd,     f_no_opd, "", None),      # 4
+        OPC(0xffff, 0x9418, "sez",    "",           no_opd,     f_no_opd, "", None),      # 4
+        OPC(0xffff, 0x9588, "sleep",  "",           no_opd,     f_no_opd, "", None),      # 2
+        OPC(0xffff, 0x95e8, "spm",    "",           no_opd,     f_no_opd, "", None),
+        OPC(0xffff, 0x95f8, "spm",    "",           just_zp,    f_just_zp, "", None),
+        OPC(0xfe0f, 0x920c, "st",     "-4r5",       x_reg,      f_x_reg, "", None),
+        OPC(0xfe0f, 0x920d, "st",     "-4r5",       xp_reg,     f_xp_reg, "", None),
+        OPC(0xfe0f, 0x920e, "st",     "-4r5",       mx_reg,     f_mx_reg, "", None),
+        OPC(0xfe0f, 0x8208, "st",     "-4r5",       y_reg,      f_y_reg, "", None),
+        OPC(0xfe0f, 0x9209, "st",     "-4r5",       yp_reg,     f_yp_reg, "", None),
+        OPC(0xfe0f, 0x920a, "st",     "-4r5",       my_reg,     f_my_reg, "", None),
+        OPC(0xd208, 0x8208, "std",    "q3-1r5-1q2-1q1", yo_reg, f_yo_reg, "", None),
+        OPC(0xfe0f, 0x8200, "st",     "-4d5",       z_reg,      f_z_reg, "", None),
+        OPC(0xfe0f, 0x9201, "st",     "-4d5",       zp_reg,     f_zp_reg, "", None),
+        OPC(0xfe0f, 0x9202, "st",     "-4d5",       mz_reg,     f_mz_reg, "", None),
+        OPC(0xd208, 0x8200, "std",    "q3-1d5-1q2-1q1", zo_reg, f_zo_reg, "", None),
+        OPC(0xfe0f, 0x9200, "sts",    "!k16-4d5",   imm16_reg,  f_imm16_reg, "", None),
+        OPC(0xf800, 0xa800, "sts",    "k4d4k3",     imm7_reg,   f_imm7_reg, "", None),
+        OPC(0xfc00, 0x1800, "sub",    "r4d5r1",     reg_reg,    f_reg_reg, "", None),     # 1
+        OPC(0xf000, 0x5000, "subi",   "K4d4K4",     reg8_imm,   f_reg8_imm, "", None),    # 3
+        OPC(0xfe0f, 0x9402, "swap",   "-4d5",       reg,        f_reg, "", None),         # 2
 
         #T
-        OPC(0xfc00, 0x2000, "tst",    "r4d5r1",     reg,        f_reg),         # 1
+        OPC(0xfc00, 0x2000, "tst",    "r4d5r1",     reg,        f_reg, "", None),         # 1
 
         #U - No hay
 
         #V - No hay
 
         #W
-        OPC(0xffff, 0x95a8, "wdr",    "",           no_opd,     f_no_opd),      # 2
+        OPC(0xffff, 0x95a8, "wdr",    "",           no_opd,     f_no_opd, "", None),      # 2
 
         #X
         #~ OPC(0xfe0f, 0x9204, "xch",    "-4d5",    reg,        f_reg)    # Not for atmega328
@@ -999,15 +1016,20 @@ class Atmega328():
 
     def get_bit(self, reg, bit):
         return (reg >> bit) & 0x01
+    
+    def set_bit(self, reg, bit, value):
+        if value == 1:
+            reg = reg | (1 << bit)
+        else:
+            reg = reg & (~(1 << bit))
+        
+        return reg
 
     def get_flag(self, flag):
         return self.get_bit(self.flags, flag)
 
     def set_flag(self, flag , value):
-        if value == 1:
-            self.flags = self.flags | (1 << flag)
-        else:
-            self.flags = self.flags & (~(1 << flag))
+        self.flags = self.set_bit(self.flags, flag, value)
 
     def reset(self):
         self.pc = 0
@@ -1024,6 +1046,15 @@ class Atmega328():
                 break
         else:
             print("Instruccion no decodificada: {:04x}".format(opc))
+            return None
+        return entry
+    
+    def find_instruction(self, instruction):
+        for entry in self.opcodes:
+            if instruction == entry.opcstr:
+                break
+        else:
+            print("Instruccion no encontrada:" + instruction)
             return None
         return entry
 
@@ -1079,6 +1110,55 @@ class Atmega328():
         else:
             s += entry.fmt(opd_dict, self)
         return (s, pc)
+        
+    def assemble_one_instruction(self, line, mem_pos):
+        instruction = 0
+        
+        try:
+            l = (self.etiqueta + self.comentario).parseString(line)
+            return None
+        except:
+            pass
+        opc = re.match("([a-zA-Z]+)",line)
+        
+        entry = self.find_instruction(opc.group(1))
+        instruction = entry.remainder
+        
+        try:
+            opd_list = (entry.token + self.comentario).parseString(line, parseAll=True)
+            if entry.fmt == self.dreg_imm:
+                opd_list[0] = (int(opd_list[0])-24)/2
+        except:
+            print("Instruccion no valida")
+            return None
+        
+        cmd = entry.code_opd
+                
+        #Parametro para la asignacion de los bits
+        itr = 0
+        while cmd != "":                                
+            r = re.match("([a-b-])(\d+)", cmd)   
+            
+            if r.group(1) == "-":
+                itr += int(r.group(1))
+                continue
+            
+            #que valor es el correcto
+            opd = 0 if r.group(1) == "a" else 1
+            
+            #cantidad de bits a desplazar
+            itr_aux = int(r.group(2))
+            
+            for bit in range(itr_aux):
+                value = int(opd_list[opd]) & 0x01
+                opd_list[opd] = int(opd_list[opd]) >> 1
+                
+                instruction = self.set_bit(instruction, itr + bit, value)            
+            itr+= itr_aux   
+            cmd = cmd[2:]
+        
+        
+        return instruction
 
 
     def single_step(self, pc = None, symtable = None):
@@ -1169,8 +1249,11 @@ class Test():
 
 def main(args):
     #Correr test 9 ultimas instrucciones
-    test = Test()
-    test.run()
+    cpu = Atmega328(None)
+    intruction = "add r3,r16"
+    print("Instruccion: " + intruction)
+    print("\nResultado hexa: " + "{:04x}".format(cpu.assemble_one_instruction(intruction,0)))
+    print("Resultado binario: " + "{:016b}".format(cpu.assemble_one_instruction(intruction,0)))
 
     return 0
 
