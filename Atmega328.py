@@ -26,6 +26,7 @@ import re
 from sim_mem import Memory
 from pyparsing import Word, alphas, nums, alphanums, Literal, Suppress, ZeroOrMore, Optional, hexnums
 
+
 class OPC():
     mask      = 0
     remainder = 0
@@ -49,6 +50,8 @@ class Atmega328():
     def calc_addr(self, pc, offs, rng):
         return pc + 2*(offs if offs < (rng // 2)
             else offs - rng)
+    
+    symtable = None
 
     imm_4      = lambda d, s: "{K[0]:d}".format(**d)
     bit        = lambda d, s: "{s[0]:d}".format(**d)
@@ -111,7 +114,27 @@ class Atmega328():
     C = 0
     
     #Tokens
-    etiqueta = Word(alphas, alphas + nums) + ":"
+    def convert_hex_1(x):
+        x[1] = int(x[1],16)
+        return x
+
+    def convert_hex_0(x):
+        x[0] = int(x[0],16)
+        return x
+    
+    def convert_reg24_30(x):
+        x[0] = (int(x[0])-24)/2
+        return x
+    
+    def convert_reg16_31(x):
+        x[0] = int(x[0])-16
+        return x
+    
+    def convert_jmp_0(x):
+        x[0] = Atmega328.symtable[x[0]]
+        return x
+    
+    etiqueta = Word(alphas, alphas + nums) + Suppress(":")
     comentario = Optional(Suppress(";" + Word(alphanums)))
     
     d0_31 = Suppress(Word(alphas) + "r") + Word(nums)
@@ -120,8 +143,21 @@ class Atmega328():
     d0_31_r0_31 = Suppress(Word(alphas) + "r") + Word(nums) + Suppress(","+ZeroOrMore(" ")+"r") + Word(nums)
     d0_31_r0_31.addCondition(lambda t: int(t[0]) <= 31 and int(t[1]) <= 31)
     
-    d0_31_k24_30 = Suppress(Word(alphas) + "r") + Word(nums) + Suppress(","+ZeroOrMore(" ")) + Word(hexnums)
-    d0_31_k24_30.addCondition(lambda t: int(t[0]) <= 31 and int(t[1]) <= 31)
+    d24_30_k0_63 = Suppress(Word(alphas) + "r") + Word(nums) + Suppress(","+ZeroOrMore(" ") + "0x") + Word(hexnums)
+    d24_30_k0_63.addCondition(lambda t: int(t[0]) <= 30 and int(t[0]) >= 24 and int(t[0])%2 == 0 and int(t[1],16) <= 63 )
+    d24_30_k0_63.addParseAction(convert_hex_1)
+    d24_30_k0_63.addParseAction(convert_reg24_30)
+    
+    d16_31_k0_255 = Suppress(Word(alphas) + "r") + Word(nums) + Suppress(","+ZeroOrMore(" ") + "0x") + Word(hexnums)
+    d16_31_k0_255.addCondition(lambda t: int(t[0]) <= 31 and int(t[0]) >= 16 and int(t[1],16) <= 255)
+    d16_31_k0_255.addParseAction(convert_hex_1)
+    d16_31_k0_255.addParseAction(convert_reg16_31)
+    
+    d0_31_b0_7 = Suppress(Word(alphas) + "r") + Word(nums) + Suppress(","+ZeroOrMore(" ")) + Word(hexnums)
+    d0_31_b0_7.addCondition(lambda t: int(t[0]) <= 31  and int(t[1]) <= 7)    
+    
+    jmp = Suppress(Word(alphas)) + (Word(nums) | Word(alphas))
+    jmp.setParseAction(convert_jmp_0)
 
     #GRUPO N
     def f_imm_4(self, opcstr, opd_dict):
@@ -811,20 +847,20 @@ class Atmega328():
         #A
         OPC(0xfc00, 0x1c00, "adc",    "r4d5r1",     reg_reg,    f_reg_reg, "b4a5b1", d0_31_r0_31),     # 1
         OPC(0xfc00, 0x0c00, "add",    "r4d5r1",     reg_reg,    f_reg_reg, "b4a5b1", d0_31_r0_31),     # 1
-        OPC(0xff00, 0x9600, "adiw",   "K4d2K2",     dreg_imm,   f_dreg_imm,"b4a1b2", d0_31_k24_30),    # 1
-        OPC(0xfc00, 0x2000, "and",    "r4d5r1",     reg_reg,    f_reg_reg, ""      , None),     # 1
-        OPC(0xf000, 0x7000, "andi",   "K4d4K4",     reg8_imm,   f_reg8_imm, ""      , None),    # 1
-        OPC(0xfe0f, 0x9405, "asr",    "-4d5",       reg,        f_reg, "", None),         # 3
+        OPC(0xff00, 0x9600, "adiw",   "K4d2K2",     dreg_imm,   f_dreg_imm,"b4a2b2", d24_30_k0_63),    # 1
+        OPC(0xfc00, 0x2000, "and",    "r4d5r1",     reg_reg,    f_reg_reg, "b4a5b1", d0_31_r0_31),     # 1
+        OPC(0xf000, 0x7000, "andi",   "K4d4K4",     reg8_imm,   f_reg8_imm,"b4a4b4", d16_31_k0_255),    # 1
+        OPC(0xfe0f, 0x9405, "asr",    "-4d5",       reg,        f_reg     , "-4a5",  d0_31),         # 3
 
         #B @12
         #OPC(0xff8f, 0x9488, "bclr",   "-4s3",      bit,        f_bit),
-        OPC(0xfe08, 0xf800, "bld",    "b3-1d5",     reg_bit,    f_reg_bit, ""      , None),     # 4
+        OPC(0xfe08, 0xf800, "bld",    "b3-1d5",     reg_bit,    f_reg_bit, "b3-1a5"      , d0_31_b0_7),     # 4
         #OPC(0xfc00, 0xf400, "brbc",   "s3k7",      bit_rel,    f_bit_rel),
         #OPC(0xfc00, 0xf000, "brbs",   "s3k7",      bit_rel,    f_bit_rel),
-        OPC(0xfc07, 0xf400, "brcc",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
-        OPC(0xfc07, 0xf000, "brcs",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf400, "brcc",   "-3k7",       rel_add,    f_rel_add, "-3a7"      , jmp),     # 4
+        OPC(0xfc07, 0xf000, "brcs",   "-3k7",       rel_add,    f_rel_add, "-3a7"      , jmp),     # 4
         OPC(0xffff, 0x9598, "break",  "",           no_opd,     f_no_opd, ""      , None),      # 2
-        OPC(0xfc07, 0xf001, "breq",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
+        OPC(0xfc07, 0xf001, "breq",   "-3k7",       rel_add,    f_rel_add, "-3k7"      , jmp),     # 4
         OPC(0xfc07, 0xf404, "brge",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
         OPC(0xfc07, 0xf405, "brhc",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
         OPC(0xfc07, 0xf005, "brhs",   "-3k7",       rel_add,    f_rel_add, ""      , None),     # 4
@@ -1008,7 +1044,7 @@ class Atmega328():
 
     def __init__(self, symtable):
         self.flash = Memory(32768, Memory.FLASH)
-        self.symtable = symtable
+        #self.symtable = symtable
         self.pc = 0
         self.sp = 0x7fff
         self.ram = [0] * 32
@@ -1111,25 +1147,33 @@ class Atmega328():
             s += entry.fmt(opd_dict, self)
         return (s, pc)
         
+    #funcion para ensamblar una instruccion
     def assemble_one_instruction(self, line, mem_pos):
         instruction = 0
         
         try:
             l = (self.etiqueta + self.comentario).parseString(line)
+            self.symtable[l[0]] = mem_pos
             return None
-        except:
+        except Exception as e:
+            #print(e)
             pass
         opc = re.match("([a-zA-Z]+)",line)
         
         entry = self.find_instruction(opc.group(1))
+
         instruction = entry.remainder
         
         try:
             opd_list = (entry.token + self.comentario).parseString(line, parseAll=True)
-            if entry.fmt == self.dreg_imm:
-                opd_list[0] = (int(opd_list[0])-24)/2
-        except:
+            if entry.token == Atmega328.jmp:
+                opd_list[0] = opd_list[0] - mem_pos + (128 if opd_list[0] < mem_pos else 0)
+                print(opd_list)
+
+                
+        except Exception as e:
             print("Instruccion no valida")
+            print(e)
             return None
         
         cmd = entry.code_opd
@@ -1140,7 +1184,8 @@ class Atmega328():
             r = re.match("([a-b-])(\d+)", cmd)   
             
             if r.group(1) == "-":
-                itr += int(r.group(1))
+                itr += int(r.group(2))
+                cmd = cmd[2:]
                 continue
             
             #que valor es el correcto
@@ -1148,7 +1193,7 @@ class Atmega328():
             
             #cantidad de bits a desplazar
             itr_aux = int(r.group(2))
-            
+                        
             for bit in range(itr_aux):
                 value = int(opd_list[opd]) & 0x01
                 opd_list[opd] = int(opd_list[opd]) >> 1
@@ -1249,11 +1294,23 @@ class Test():
 
 def main(args):
     #Correr test 9 ultimas instrucciones
-    cpu = Atmega328(None)
-    intruction = "add r3,r16"
+    symTable = {}
+    Atmega328.symtable = symTable
+    cpu = Atmega328(symTable)
+    intruction = "main:"
+    
     print("Instruccion: " + intruction)
-    print("\nResultado hexa: " + "{:04x}".format(cpu.assemble_one_instruction(intruction,0)))
-    print("Resultado binario: " + "{:016b}".format(cpu.assemble_one_instruction(intruction,0)))
+
+    res = cpu.assemble_one_instruction(intruction,0)
+    
+    intruction = "brcs    main"
+    print("Instruccion: " + intruction)
+
+    res = cpu.assemble_one_instruction(intruction,13)
+    if res != None:
+        print("\nResultado hexa: " + "{:04x}".format(res))
+        print("Resultado binario: " + "{:016b}".format(res))
+    
 
     return 0
 
